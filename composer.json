@@ -49,6 +49,6 @@
       "Kodbruket\\VsfKco\\": "src/module-vsf-kco"
     }
   },
-  "minimum-stability": "dev",
+  "minimum-stability": "alpha",
   "prefer-stable": true
 }
