@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * This file is part of the Klarna KP module
+ *
+ * (c) Klarna Bank AB (publ)
+ *
+ * For the full copyright and license information, please view the NOTICE
+ * and LICENSE files that were distributed with this source code.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <section id="payment">
+            <group id="klarna_section" sortOrder="6" showInDefault="1" showInWebsite="1" showInStore="1">
+                <group id="klarna">
+                    <group id="klarna_vsf" type="text" sortOrder="102" showInDefault="1" showInWebsite="1"
+                           showInStore="1"
+                           translate="label">
+                        <label>Klarna VueStoreFront</label>
+                        <field id="successful_link" translate="label" type="text" showInDefault="1" showInWebsite="1"
+                               showInStore="1">
+                            <label>Successful Link</label>
+                            <config_path>klarna/vsf/successful_link</config_path>
+                            <comment>The VSF successful link will be redirected if the commit of the order succeeds.</comment>
+                        </field>
+                        <field id="failed_link" translate="label" type="text" showInDefault="1" showInWebsite="1"
+                               showInStore="1">
+                            <label>Failed Link</label>
+                            <config_path>klarna/vsf/failed_link</config_path>
+                            <comment>The VSF failed link will be redirected if the commit of the order fails.</comment>
+                        </field>
+                    </group>
+                </group>
+            </group>
+        </section>
+    </system>
+</config>
