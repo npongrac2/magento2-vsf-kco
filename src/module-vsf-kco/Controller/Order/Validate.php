@@ -1,26 +1,26 @@
 <?php
 namespace Kodbruket\VsfKco\Controller\Order;
 
+use Klarna\Core\Api\OrderRepositoryInterface;
+use Klarna\Core\Model\OrderFactory;
 use Kodbruket\VsfKco\Model\ExtensionConstants;
 use Kodbruket\VsfKco\Model\Klarna\DataTransform\Request\Address;
 use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Model\CustomerFactory;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
+use Magento\Framework\App\Request\InvalidRequestException;
+use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\DataObject;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\Data\CartInterface;
-use Magento\Quote\Model\QuoteManagement;
-use Psr\Log\LoggerInterface;
-use Klarna\Core\Api\OrderRepositoryInterface;
-use Klarna\Core\Model\OrderFactory;
-use Magento\Framework\App\RequestInterface;
-use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Quote\Model\QuoteIdMask;
 use Magento\Quote\Model\QuoteIdMaskFactory;
+use Magento\Quote\Model\QuoteManagement;
+use Psr\Log\LoggerInterface;
 
 /**
  * Class Validate
@@ -123,6 +123,93 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
     }
 
     /**
+     * Execute action based on request and return result
+     *
+     * Note: Request will be added as operation argument in future
+     *
+     * @return \Magento\Framework\Controller\ResultInterface|ResponseInterface
+     * @throws \Magento\Framework\Exception\NotFoundException
+     * @throws \Magento\Framework\Exception\NoSuchEntityException
+     */
+    public function execute()
+    {
+        $this->logger->info('Validate: start');
+        if (!$this->getRequest()->isPost()) {
+            $this->logger->info('Validate: No post request');
+
+            $resultPage = $this->jsonFactory->create();
+            $resultPage->setHttpResponseCode(404);
+            return $resultPage;
+        }
+
+        $klarnaOderId = $this->getKlarnaOrderId();
+
+        $quote = $this->cartRepository->get($this->getQuoteId());
+        if (!$quote->getId() || !$quote->hasItems() || $quote->getHasError()) {
+            $this->logger->info('Validate: invalid magento quote');
+            return $this->setValidateFailedResponse($klarnaOderId);
+        }
+
+        try {
+            $checkoutData = $this->getKlarnaRequestData();
+            $this->logger->info('Input request :' . print_r($checkoutData->toArray(), true));
+            if (!$quote->isVirtual()) {
+                $this->logger->info('updating order addresses');
+                $this->updateOrderAddresses($checkoutData, $quote);
+                $shippingMethodCode = null;
+                if ($shippingMethod = $checkoutData->getData('selected_shipping_option')) {
+                    $shippingMethodCode = $shippingMethod['id'];
+                } else {
+                    if ($shippingMethod = $this->getShippingMedthodFromOrderLines($checkoutData)) {
+                        $shippingMethodCode = $shippingMethod['reference'];
+                    }
+                }
+                if (isset($shippingMethodCode)) {
+                    $this->logger->info('Shipping method :' . print_r($shippingMethod, true));
+                    $quote->getShippingAddress()->setShippingMethod($this->convertShippingMethodCode($shippingMethodCode));
+                }
+            }
+            $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
+            $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
+
+            $quote->getShippingAddress()
+                ->setCollectShippingRates(true)
+                ->collectShippingRates();
+            $payment = $quote->getPayment();
+            $payment->importData(['method' => \Klarna\Kp\Model\Payment\Kp::METHOD_CODE]);
+            $payment->setAdditionalInformation(ExtensionConstants::FORCE_ORDER_PLACE, true);
+            $payment->setAdditionalInformation(ExtensionConstants::KLARNA_ORDER_ID, $klarnaOderId);
+
+            $quote->reserveOrderId();
+            $this->cartRepository->save($quote);
+
+            /** @var \Klarna\Core\Model\Order $klarnaOrder */
+            $klarnaOrder = $this->klarnaOrderFactory->create();
+            $klarnaOrder->setData([
+                'klarna_order_id' => $klarnaOderId,
+                'reservation_id' => $klarnaOderId,
+            ]);
+            $this->klarnaOrderRepository->save($klarnaOrder);
+
+            return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(200);
+        } catch (\Exception $exception) {
+            $this->logger->critical('validation save kco Order' . $exception->getMessage());
+            $this->logger->critical('validation save kco Order' . $exception->getTraceAsString());
+            return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(500);
+        }
+    }
+
+    /**
+     * @return int
+     */
+    private function getKlarnaOrderId()
+    {
+        return $this->getKlarnaRequestData()->getData(
+            'order_id'
+        );
+    }
+
+    /**
      * @return DataObject
      */
     private function getKlarnaRequestData()
@@ -141,19 +228,9 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
     /**
      * @return int
      */
-    private function getKlarnaOrderId()
-    {
-        return $this->getKlarnaRequestData()->getData(
-            'order_id'
-        );
-    }
-
-    /**
-     * @return int
-     */
     private function getQuoteId()
     {
-        $mask =  $this->getKlarnaRequestData()->getData(
+        $mask = $this->getKlarnaRequestData()->getData(
             'merchant_reference2'
         );
 
@@ -163,70 +240,23 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
     }
 
     /**
-     * Execute action based on request and return result
-     *
-     * Note: Request will be added as operation argument in future
-     *
-     * @return \Magento\Framework\Controller\ResultInterface|ResponseInterface
-     * @throws \Magento\Framework\Exception\NotFoundException
-     * @throws \Magento\Framework\Exception\NoSuchEntityException
+     * @param $checkoutId
+     * @param string $message
+     * @return \Magento\Framework\Controller\Result\Redirect
      */
-    public function execute()
+    private function setValidateFailedResponse($checkoutId, $message = null)
     {
-        $this->logger->debug('Validate: start');
-        if (!$this->getRequest()->isPost()) {
-            $this->logger->debug('Validate: No post request');
-
-            $resultPage = $this->jsonFactory->create();
-            $resultPage->setHttpResponseCode(404);
-            return $resultPage;
-        }
-
-        $klarnaOderId = $this->getKlarnaOrderId();
-        /** @var \Magento\Quote\Model\Quote $quote */
-        $quote = $this->cartRepository->get($this->getQuoteId());
-        if (!$quote->getId() || !$quote->hasItems() || $quote->getHasError()) {
-            $this->logger->debug('Validate: invalid magento quote');
-            return $this->setValidateFailedResponse($klarnaOderId);
-        }
-
-        try {
-            $checkoutData = $this->getKlarnaRequestData();
-            $this->logger->debug('Input request :' . print_r($checkoutData->toArray(), true));
-            if (!$quote->isVirtual()) {
-                $this->logger->debug('updating order addresses');
-                $this->updateOrderAddresses($checkoutData, $quote);
-                $shippingMethod = $checkoutData->getData('selected_shipping_option');
-                $quote->getShippingAddress()->setShippingMethod($shippingMethod['id']);
-            }
-            $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
-            $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
-
-            $quote->getShippingAddress()
-                ->setCollectShippingRates(true)
-                ->collectShippingRates();
-            $payment = $quote->getPayment();
-            $payment->importData(['method' => \Klarna\Kp\Model\Payment\Kp::METHOD_CODE]);
-            $payment->setAdditionalInformation(ExtensionConstants::FORCE_ORDER_PLACE, true);
-            $payment->setAdditionalInformation(ExtensionConstants::KLARNA_ORDER_ID, $klarnaOderId);
-
-            $quote->reserveOrderId();
-            $this->cartRepository->save($quote);;
-
-            /** @var \Klarna\Core\Model\Order $klarnaOrder */
-            $klarnaOrder = $this->klarnaOrderFactory->create();
-            $klarnaOrder->setData([
-                'klarna_order_id' => $klarnaOderId,
-                'reservation_id'  => $klarnaOderId,
-            ]);
-            $this->klarnaOrderRepository->save($klarnaOrder);
-
-            return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(200);
-        } catch (\Exception $exception) {
-            $this->logger->critical('validation save kco Order' . $exception->getMessage());
-            $this->logger->critical('validation save kco Order' . $exception->getTraceAsString());
-            return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(500);
-        }
+        return $this->resultRedirectFactory->create()
+            ->setHttpResponseCode(303)
+            ->setStatusHeader(303, null, $message)
+            ->setPath(
+                'checkout/klarna/validateFailed',
+                [
+                    '_nosid' => true,
+                    '_escape' => false,
+                    '_query' => ['id' => $checkoutId, 'message' => $message]
+                ]
+            );
     }
 
     /**
@@ -252,7 +282,7 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
             $customer = $this->customerFactory->create();
             $customer->setWebsiteId($websiteId);
             $customer->loadByEmail($billingAddress->getEmail());
-            if(!$customer->getEntityId()){
+            if (!$customer->getEntityId()) {
                 $customer->setWebsiteId($websiteId)
                     ->setStore($quote->getStore())
                     ->setFirstname($billingAddress->getGivenName())
@@ -261,7 +291,7 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
                     ->setPassword($billingAddress->getEmail());
                 $customer->save();
             }
-            $customer= $this->customerRepository->getById($customer->getEntityId());
+            $customer = $this->customerRepository->getById($customer->getEntityId());
             $quote->assignCustomer($customer);
         }
 
@@ -280,25 +310,31 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         }
     }
 
+    /**
+     * @param DataObject $checkoutData
+     * @return bool|mixed
+     */
+    private function getShippingMedthodFromOrderLines(DataObject $checkoutData)
+    {
+        $orderLines = $checkoutData->getData('order_lines');
+
+        if (is_array($orderLines)) {
+            foreach ($orderLines as $line) {
+                if (isset($line['type']) && $line['reference'] && $line['type'] === 'shipping_fee') {
+                    return $line;
+                }
+            }
+        }
+        return false;
+    }
 
     /**
-     * @param $checkoutId
-     * @param string $message
-     * @return \Magento\Framework\Controller\Result\Redirect
+     * @param $shippingCode
+     * @return string
      */
-    private function setValidateFailedResponse($checkoutId, $message = null)
+    private function convertShippingMethodCode($shippingCode)
     {
-        return $this->resultRedirectFactory->create()
-            ->setHttpResponseCode(303)
-            ->setStatusHeader(303, null, $message)
-            ->setPath(
-                'checkout/klarna/validateFailed',
-                [
-                    '_nosid'  => true,
-                    '_escape' => false,
-                    '_query'  => ['id' => $checkoutId, 'message' => $message]
-                ]
-            );
+        return $shippingCode . '_' . $shippingCode;
     }
 
     /**
