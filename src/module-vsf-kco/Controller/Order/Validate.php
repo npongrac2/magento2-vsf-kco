@@ -9,17 +9,18 @@ use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Model\CustomerFactory;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Framework\App\RequestInterface;
 use Magento\Framework\App\ResponseInterface;
-use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\DataObject;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\QuoteIdMask;
 use Magento\Quote\Model\QuoteIdMaskFactory;
-use Magento\Quote\Model\QuoteManagement;
+use Magento\Store\Model\ScopeInterface;
+use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -28,10 +29,6 @@ use Psr\Log\LoggerInterface;
  */
 class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionInterface
 {
-    /**
-     * @var JsonFactory
-     */
-    private $jsonFactory;
 
     /**
      * @var LoggerInterface
@@ -52,11 +49,6 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
      * @var Address
      */
     private $addressDataTransform;
-
-    /**
-     * @var QuoteManagement
-     */
-    private $quoteManagement;
 
     /**
      * @var OrderFactory
@@ -84,9 +76,18 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
     private $quoteIdMaskFactory;
 
     /**
+     * @var StoreManagerInterface
+     */
+    private $storeManager;
+
+    /**
+     * @var ScopeConfigInterface
+     */
+    private $scopeConfig;
+
+    /**
      * Validate constructor.
      * @param Context $context
-     * @param JsonFactory $jsonFactory
      * @param LoggerInterface $logger
      * @param CartRepositoryInterface $cartRepository
      * @param Address $addressDataTransform
@@ -95,10 +96,11 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
      * @param OrderRepositoryInterface $klarnaOrderRepository
      * @param CustomerRepositoryInterface $customerRepository
      * @param QuoteIdMaskFactory $quoteIdMaskFactory
+     * @param StoreManagerInterface $storeManager
+     * @param ScopeConfigInterface $scopeConfig
      */
     public function __construct(
         Context $context,
-        JsonFactory $jsonFactory,
         LoggerInterface $logger,
         CartRepositoryInterface $cartRepository,
         Address $addressDataTransform,
@@ -106,12 +108,13 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         CustomerFactory $customerFactory,
         OrderRepositoryInterface $klarnaOrderRepository,
         CustomerRepositoryInterface $customerRepository,
-        QuoteIdMaskFactory $quoteIdMaskFactory
+        QuoteIdMaskFactory $quoteIdMaskFactory,
+        StoreManagerInterface $storeManager,
+        ScopeConfigInterface $scopeConfig
     ) {
         parent::__construct(
             $context
         );
-        $this->jsonFactory = $jsonFactory;
         $this->logger = $logger;
         $this->cartRepository = $cartRepository;
         $this->addressDataTransform = $addressDataTransform;
@@ -120,6 +123,8 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         $this->customerFactory = $customerFactory;
         $this->customerRepository = $customerRepository;
         $this->quoteIdMaskFactory = $quoteIdMaskFactory;
+        $this->scopeConfig = $scopeConfig;
+        $this->storeManager = $storeManager;
     }
 
     /**
@@ -136,10 +141,7 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         $this->logger->info('Validate: start');
         if (!$this->getRequest()->isPost()) {
             $this->logger->info('Validate: No post request');
-
-            $resultPage = $this->jsonFactory->create();
-            $resultPage->setHttpResponseCode(404);
-            return $resultPage;
+            return $this->setValidateFailedResponse();
         }
 
         $klarnaOderId = $this->getKlarnaOrderId();
@@ -147,7 +149,7 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         $quote = $this->cartRepository->get($this->getQuoteId());
         if (!$quote->getId() || !$quote->hasItems() || $quote->getHasError()) {
             $this->logger->info('Validate: invalid magento quote');
-            return $this->setValidateFailedResponse($klarnaOderId);
+            return $this->setValidateFailedResponse();
         }
 
         try {
@@ -195,8 +197,22 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         } catch (\Exception $exception) {
             $this->logger->critical('validation save kco Order' . $exception->getMessage());
             $this->logger->critical('validation save kco Order' . $exception->getTraceAsString());
-            return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(500);
+            return $this->setValidateFailedResponse();
         }
+    }
+
+    /**
+     * @param string $message
+     * @return \Magento\Framework\Controller\Result\Redirect
+     */
+    private function setValidateFailedResponse($message = null)
+    {
+        $store = $this->storeManager->getStore();
+        $failedUrl = $this->scopeConfig->getValue('klarna/vsf/failed_link', ScopeInterface::SCOPE_STORES, $store);
+        return $this->resultRedirectFactory->create()
+            ->setHttpResponseCode(303)
+            ->setStatusHeader(303, null, $message)
+            ->setUrl($failedUrl);
     }
 
     /**
@@ -237,26 +253,6 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
         /** @var $quoteIdMask QuoteIdMask */
         $quoteIdMask = $this->quoteIdMaskFactory->create()->load($mask, 'masked_id');
         return $quoteIdMask->getQuoteId();
-    }
-
-    /**
-     * @param $checkoutId
-     * @param string $message
-     * @return \Magento\Framework\Controller\Result\Redirect
-     */
-    private function setValidateFailedResponse($checkoutId, $message = null)
-    {
-        return $this->resultRedirectFactory->create()
-            ->setHttpResponseCode(303)
-            ->setStatusHeader(303, null, $message)
-            ->setPath(
-                'checkout/klarna/validateFailed',
-                [
-                    '_nosid' => true,
-                    '_escape' => false,
-                    '_query' => ['id' => $checkoutId, 'message' => $message]
-                ]
-            );
     }
 
     /**
