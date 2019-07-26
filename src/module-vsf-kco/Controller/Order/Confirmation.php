@@ -61,6 +61,9 @@ class Confirmation extends Action
      */
     private $quoteIdMaskFactory;
 
+    /**
+     * @var ScopeConfigInterface
+     */
     private $scopeConfig;
 
     /**
