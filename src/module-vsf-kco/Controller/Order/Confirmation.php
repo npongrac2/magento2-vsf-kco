@@ -9,6 +9,9 @@ use Klarna\Ordermanagement\Model\Api\Ordermanagement;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
 use Magento\Framework\App\Config\ScopeConfigInterface;
+use Magento\Framework\App\CsrfAwareActionInterface;
+use Magento\Framework\App\RequestInterface;
+use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\QuoteIdMaskFactory;
 use Magento\Quote\Model\QuoteManagement;
@@ -17,7 +20,7 @@ use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 
-class Confirmation extends Action
+class Confirmation extends Action implements CsrfAwareActionInterface
 {
 
     /**
@@ -152,9 +155,31 @@ class Confirmation extends Action
         }
         $failedUrl = $this->scopeConfig->getValue('klarna/vsf/failed_link', ScopeInterface::SCOPE_STORES, $store);
         $resultRedirect->setUrl($failedUrl);
+
         return $resultRedirect;
-
-
     }
 
+    /**
+     * Create CSRF validation exception
+     * 
+     * @param RequestInterface $request
+     *
+     * @return InvalidRequestException|null
+     */
+    public function createCsrfValidationException(RequestInterface $request): ?InvalidRequestException
+    {
+        return null;
+    }
+
+    /**
+     * Validate for CSRF
+     * 
+     * @param RequestInterface $request
+     *
+     * @return bool|null
+     */
+    public function validateForCsrf(RequestInterface $request): ?bool
+    {
+        return true;
+    }
 }

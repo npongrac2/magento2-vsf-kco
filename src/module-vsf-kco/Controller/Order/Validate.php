@@ -10,8 +10,9 @@ use Magento\Customer\Model\CustomerFactory;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
 use Magento\Framework\App\Config\ScopeConfigInterface;
-use Magento\Framework\App\Request\InvalidRequestException;
+use Magento\Framework\App\CsrfAwareActionInterface;
 use Magento\Framework\App\RequestInterface;
+use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\DataObject;
@@ -27,7 +28,7 @@ use Psr\Log\LoggerInterface;
  * Class Validate
  * @package Kodbruket\VsfKco\Controller\Order
  */
-class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionInterface
+class Validate extends Action implements CsrfAwareActionInterface
 {
 
     /**
@@ -334,7 +335,10 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
     }
 
     /**
+     * Create CSRF validation exception
+     * 
      * @param RequestInterface $request
+     *
      * @return InvalidRequestException|null
      */
     public function createCsrfValidationException(RequestInterface $request): ?InvalidRequestException
@@ -343,7 +347,10 @@ class Validate extends Action implements \Magento\Framework\App\CsrfAwareActionI
     }
 
     /**
+     * Validate for CSRF
+     * 
      * @param RequestInterface $request
+     *
      * @return bool|null
      */
     public function validateForCsrf(RequestInterface $request): ?bool
