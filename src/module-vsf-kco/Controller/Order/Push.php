@@ -8,6 +8,9 @@ use Klarna\Ordermanagement\Api\ApiInterface;
 use Klarna\Ordermanagement\Model\Api\Ordermanagement;
 use Magento\Framework\App\Action\Action;
 use Magento\Framework\App\Action\Context;
+use Magento\Framework\App\CsrfAwareActionInterface;
+use Magento\Framework\App\RequestInterface;
+use Magento\Framework\App\Request\InvalidRequestException;
 use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\QuoteIdMaskFactory;
 use Magento\Quote\Model\QuoteManagement;
@@ -15,7 +18,7 @@ use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
 
-class Push extends Action
+class Push extends Action implements CsrfAwareActionInterface
 {
 
     /**
@@ -161,5 +164,29 @@ class Push extends Action
             echo 'Something went wrong when sending ACK';
         }
         return;
+    }
+
+    /**
+     * Create CSRF validation exception
+     * 
+     * @param RequestInterface $request
+     *
+     * @return InvalidRequestException|null
+     */
+    public function createCsrfValidationException(RequestInterface $request): ?InvalidRequestException
+    {
+        return null;
+    }
+
+    /**
+     * Validate for CSRF
+     * 
+     * @param RequestInterface $request
+     *
+     * @return bool|null
+     */
+    public function validateForCsrf(RequestInterface $request): ?bool
+    {
+        return true;
     }
 }
