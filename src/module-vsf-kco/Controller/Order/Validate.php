@@ -175,9 +175,6 @@ class Validate extends Action implements CsrfAwareActionInterface
             $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
             $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
 
-            $quote->getShippingAddress()
-                ->setCollectShippingRates(true)
-                ->collectShippingRates();
             $payment = $quote->getPayment();
             $payment->importData(['method' => \Klarna\Kp\Model\Payment\Kp::METHOD_CODE]);
             $payment->setAdditionalInformation(ExtensionConstants::FORCE_ORDER_PLACE, true);
