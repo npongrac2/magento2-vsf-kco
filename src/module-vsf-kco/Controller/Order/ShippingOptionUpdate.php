@@ -17,19 +17,15 @@ use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\DataObject;
 use Magento\Quote\Api\CartRepositoryInterface;
+use Magento\Quote\Model\QuoteRepository as MageQuoteRepository;
 use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\QuoteIdMask;
 use Magento\Quote\Model\QuoteIdMaskFactory;
 use Magento\Store\Model\ScopeInterface;
 use Magento\Store\Model\StoreManagerInterface;
-use Magento\Quote\Model\Quote\Address\Rate;
 use Psr\Log\LoggerInterface;
 
-/**
- * Class Validate
- * @package Kodbruket\VsfKco\Controller\Order
- */
-class Validate extends Action implements CsrfAwareActionInterface
+class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
 {
 
     /**
@@ -41,6 +37,11 @@ class Validate extends Action implements CsrfAwareActionInterface
      * @var CartRepositoryInterface
      */
     private $cartRepository;
+
+    /**
+     * @var MageQuoteRepository
+     */
+    private $mageQuoteRepository;
 
     /**
      * @var DataObject
@@ -83,11 +84,6 @@ class Validate extends Action implements CsrfAwareActionInterface
     private $storeManager;
 
     /**
-     * @var Rate
-     */
-    private $shippingRate;
-
-    /**
      * @var ScopeConfigInterface
      */
     private $scopeConfig;
@@ -97,6 +93,7 @@ class Validate extends Action implements CsrfAwareActionInterface
      * @param Context $context
      * @param LoggerInterface $logger
      * @param CartRepositoryInterface $cartRepository
+     * @param MageQuoteRepository $mageQuoteRepository
      * @param Address $addressDataTransform
      * @param OrderFactory $klarnaOrderFactory
      * @param CustomerFactory $customerFactory
@@ -110,6 +107,7 @@ class Validate extends Action implements CsrfAwareActionInterface
         Context $context,
         LoggerInterface $logger,
         CartRepositoryInterface $cartRepository,
+        MageQuoteRepository $mageQuoteRepository,
         Address $addressDataTransform,
         OrderFactory $klarnaOrderFactory,
         CustomerFactory $customerFactory,
@@ -117,14 +115,14 @@ class Validate extends Action implements CsrfAwareActionInterface
         CustomerRepositoryInterface $customerRepository,
         QuoteIdMaskFactory $quoteIdMaskFactory,
         StoreManagerInterface $storeManager,
-        ScopeConfigInterface $scopeConfig,
-        Rate $shippingRate
+        ScopeConfigInterface $scopeConfig
     ) {
         parent::__construct(
             $context
         );
         $this->logger = $logger;
         $this->cartRepository = $cartRepository;
+        $this->mageQuoteRepository = $mageQuoteRepository;
         $this->addressDataTransform = $addressDataTransform;
         $this->klarnaOrderFactory = $klarnaOrderFactory;
         $this->klarnaOrderRepository = $klarnaOrderRepository;
@@ -133,7 +131,6 @@ class Validate extends Action implements CsrfAwareActionInterface
         $this->quoteIdMaskFactory = $quoteIdMaskFactory;
         $this->scopeConfig = $scopeConfig;
         $this->storeManager = $storeManager;
-        $this->shippingRate = $shippingRate;
     }
 
     /**
@@ -147,124 +144,117 @@ class Validate extends Action implements CsrfAwareActionInterface
      */
     public function execute()
     {
-        $this->logger->info('Validate: start');
-        if (!$this->getRequest()->isPost()) {
-            $this->logger->info('Validate: No post request');
-            return $this->setValidateFailedResponse();
-        }
+        $data = $this->getKlarnaRequestData();
+        $quoteId = $this->getQuoteId();
+        $quote = $this->mageQuoteRepository->get($quoteId);
+        $shippingMethodCode = null;
+        $shippingDescription = "Shipping";
 
-        $klarnaOderId = $this->getKlarnaOrderId();
-
-        $quote = $this->cartRepository->get($this->getQuoteId());
-        if (!$quote->getId() || !$quote->hasItems() || $quote->getHasError()) {
-            $this->logger->info('Validate: invalid magento quote');
-            return $this->setValidateFailedResponse();
-        }
+        $this->logger->info("Shipping option update (" . $quote->getId() . "):\n" . var_export($data, true));
 
         try {
-            $checkoutData = $this->getKlarnaRequestData();
-            $this->logger->info('Input request :' . print_r($checkoutData->toArray(), true));
-            if (!$quote->isVirtual()) {
-                $this->logger->info('updating order addresses');
-                $this->updateOrderAddresses($checkoutData, $quote);
-                $shippingMethodCode = null;
-                if ($shippingMethod = $checkoutData->getData('selected_shipping_option')) {
-                    $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
-                    $quote->setExtShippingInfo($shippingMethodString);
-                    if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
-                        $shippingMethodCode = $shippingMethod['id'];
-                    } else {
-                        $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'].'_'.$shippingMethod['delivery_details']['class']);
-                    }
-                } else {
-                    if ($shippingMethod = $this->getShippingMedthodFromOrderLines($checkoutData)) {
-                        $shippingMethodCode = $shippingMethod['reference'];
-                    }
-                }
-                if (isset($shippingMethodCode)) {
-                    $this->logger->info(
-                        'Shipping method code converted: ' .
-                        $this->convertShippingMethodCode($shippingMethodCode) .
-                        ' vs: ' .
-                        $shippingMethodCode);
-                    $quote->getShippingAddress()
-                        ->setCollectShippingRates(true)
-                        ->collectShippingRates();
-                    $this->shippingRate
-                        ->setCode($this->convertShippingMethodCode($shippingMethodCode))
-                        ->getPrice(1);
-                    $quote->getShippingAddress()
-                        ->setShippingMethod('servicepoint_servicepoint')
-                        ->save();
+            if ($shippingMethod = $data->getData('selected_shipping_option')) {
+                $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
 
-                    $quote->getShippingAddress()->addShippingRate($this->shippingRate);
-                    $quote->collectTotals();
+                $quote->setExtShippingInfo($shippingMethodString);
+                $this->mageQuoteRepository->save($quote);
+
+                if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
+                    $shippingMethodCode = $shippingMethod['id'];
+                } else {
+                    $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'].'_'.$shippingMethod['delivery_details']['class']);
+                }
+
+                $shippingDescription = $shippingMethod['name'];
+            } else {
+                if ($shippingMethod = $this->getShippingMedthodFromOrderLines($data)) {
+                    $shippingMethodCode = $shippingMethod['reference'];
                 }
             }
-            $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
-            $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
-            $payment = $quote->getPayment();
-            $payment->importData(['method' => \Klarna\Kp\Model\Payment\Kp::METHOD_CODE]);
-            $payment->setAdditionalInformation(ExtensionConstants::FORCE_ORDER_PLACE, true);
-            $payment->setAdditionalInformation(ExtensionConstants::KLARNA_ORDER_ID, $klarnaOderId);
 
-            $quote->reserveOrderId();
-            $this->cartRepository->save($quote);
+            if (isset($shippingMethodCode)) {
+                $quote->setTotalsCollectedFlag(false);
+                $quote->getShippingAddress()->setCollectShippingRates(true)->collectShippingRates();;
+                $quote->getShippingAddress()->setShippingMethod($shippingMethodCode);
+                $quote->getShippingAddress()->setShippingDescription($shippingDescription);
+                $quote->getShippingAddress()->save();
+                $quote->collectTotals();
+            }
 
-            /** @var \Klarna\Core\Model\Order $klarnaOrder */
-            $klarnaOrder = $this->klarnaOrderFactory->create();
-            $klarnaOrder->setData([
-                'klarna_order_id' => $klarnaOderId,
-                'reservation_id' => $klarnaOderId,
-            ]);
-            $this->klarnaOrderRepository->save($klarnaOrder);
-
-            return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(200);
-        } catch (\Exception $exception) {
-            $this->logger->critical('validation save kco Order' . $exception->getMessage());
-            $this->logger->critical('validation save kco Order' . $exception->getTraceAsString());
-            return $this->setValidateFailedResponse();
+        } catch (\Exception $e) {
+            $this->logger->info($e->getMessage());
         }
+
+        $orderLines = $data->getOrderLines();
+        $i = 0;
+
+        foreach ($orderLines as $orderLine) {
+            if ($orderLine['type'] == 'shipping_fee') {
+                unset($orderLines[$i]);
+            }
+            $i++;
+        }
+
+        $orderLines[] = [
+            'type' => 'shipping_fee',
+            'name' => $quote->getShippingAddress()->getShippingDescription(),
+            'quantity' => 1,
+            'unit_price' => intval($quote->getShippingAddress()->getShippingInclTax() * 100),
+            'tax_rate' => 2500,
+            'total_amount' =>  intval($quote->getShippingAddress()->getShippingInclTax() * 100.0),
+            'total_tax_amount' => intval( $quote->getShippingAddress()->getShippingTaxAmount() * 100)
+       ];
+
+       $data->setOrderLines(array_values($orderLines));
+
+       $data->setOrderAmount(intval(round($quote->getShippingAddress()->getGrandTotal() * 100)));
+       $data->setOrderTaxAmount(intval(round($quote->getShippingAddress()->getTaxAmount() * 100)));
+
+       $keepData = [
+           'order_amount',
+           'order_tax_amount',
+           'order_lines',
+           'purchase_currency'
+       ];
+
+       $array = $data->toArray();
+
+       foreach ($array as $key => $value) {
+           if (in_array($key, $keepData)) {
+               continue;
+           } else {
+               unset($array[$key]);
+           }
+       }
+
+       return $this->resultFactory->create(ResultFactory::TYPE_JSON)
+            ->setJsonData($data->toJson())
+            ->setHttpResponseCode(200);
     }
 
     /**
-     * @param string $message
-     * @return \Magento\Framework\Controller\Result\Redirect
+     * @param $shippingCode
+     * @return string
      */
-    private function setValidateFailedResponse($message = null)
+    private function convertShippingMethodCode($shippingCode)
     {
+        if (!strpos($shippingCode, '_')) return $shippingCode . '_' . $shippingCode;
+        return $shippingCode;
+    }
+
+    private function getShippingFromKSSCarrierClass($carrierClass) {
         $store = $this->storeManager->getStore();
-        $failedUrl = $this->scopeConfig->getValue('klarna/vsf/failed_link', ScopeInterface::SCOPE_STORES, $store);
-        return $this->resultRedirectFactory->create()
-            ->setHttpResponseCode(303)
-            ->setStatusHeader(303, null, $message)
-            ->setUrl($failedUrl);
-    }
-
-    /**
-     * @return int
-     */
-    private function getKlarnaOrderId()
-    {
-        return $this->getKlarnaRequestData()->getData(
-            'order_id'
-        );
-    }
-
-    /**
-     * @return DataObject
-     */
-    private function getKlarnaRequestData()
-    {
-        if (null === $this->klarnaRequestData) {
-            /** @var \Magento\Framework\App\Request\Http $request */
-            $request = $this->getRequest();
-            $this->klarnaRequestData = new DataObject(
-                json_decode($request->getContent(), true)
-            );
+        $mappings = $this->scopeConfig->getValue('klarna/vsf/carrier_mapping', ScopeInterface::SCOPE_STORES, $store);
+        if ($mappings) {
+            $mappings = json_decode($mappings, true);
+            foreach($mappings as $item) {
+                if($item['kss_carrier'] == $carrierClass) {
+                    return $item['shipping_method'];
+                }
+            }
         }
+        return '';
 
-        return $this->klarnaRequestData;
     }
 
     /**
@@ -279,6 +269,24 @@ class Validate extends Action implements CsrfAwareActionInterface
         /** @var $quoteIdMask QuoteIdMask */
         $quoteIdMask = $this->quoteIdMaskFactory->create()->load($mask, 'masked_id');
         return $quoteIdMask->getQuoteId();
+    }
+
+    /**
+     * @param DataObject $checkoutData
+     * @return bool|mixed
+     */
+    private function getShippingMedthodFromOrderLines(DataObject $checkoutData)
+    {
+        $orderLines = $checkoutData->getData('order_lines');
+
+        if (is_array($orderLines)) {
+            foreach ($orderLines as $line) {
+                if (isset($line['type']) && $line['reference'] && $line['type'] === 'shipping_fee') {
+                    return $line;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -333,51 +341,24 @@ class Validate extends Action implements CsrfAwareActionInterface
     }
 
     /**
-     * @param DataObject $checkoutData
-     * @return bool|mixed
+     * @return DataObject
      */
-    private function getShippingMedthodFromOrderLines(DataObject $checkoutData)
+    private function getKlarnaRequestData()
     {
-        $orderLines = $checkoutData->getData('order_lines');
-
-        if (is_array($orderLines)) {
-            foreach ($orderLines as $line) {
-                if (isset($line['type']) && $line['reference'] && $line['type'] === 'shipping_fee') {
-                    return $line;
-                }
-            }
+        if (null === $this->klarnaRequestData) {
+            /** @var \Magento\Framework\App\Request\Http $request */
+            $request = $this->getRequest();
+            $this->klarnaRequestData = new DataObject(
+                json_decode($request->getContent(), true)
+            );
         }
-        return false;
-    }
 
-    private function getShippingFromKSSCarrierClass($carrierClass) {
-        $store = $this->storeManager->getStore();
-        $mappings = $this->scopeConfig->getValue('klarna/vsf/carrier_mapping', ScopeInterface::SCOPE_STORES, $store);
-        if ($mappings) {
-            $mappings = json_decode($mappings, true);
-            foreach($mappings as $item) {
-                if($item['kss_carrier'] == $carrierClass) {
-                    return $item['shipping_method'];
-                }
-            }
-        }
-        return '';
-
-    }
-
-    /**
-     * @param $shippingCode
-     * @return string
-     */
-    private function convertShippingMethodCode($shippingCode)
-    {
-        if (!strpos($shippingCode, '_')) return $shippingCode . '_' . $shippingCode;
-        return $shippingCode;
+        return $this->klarnaRequestData;
     }
 
     /**
      * Create CSRF validation exception
-     * 
+     *
      * @param RequestInterface $request
      *
      * @return InvalidRequestException|null
@@ -389,7 +370,7 @@ class Validate extends Action implements CsrfAwareActionInterface
 
     /**
      * Validate for CSRF
-     * 
+     *
      * @param RequestInterface $request
      *
      * @return bool|null
