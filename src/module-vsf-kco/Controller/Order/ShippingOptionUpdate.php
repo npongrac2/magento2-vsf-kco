@@ -3,7 +3,6 @@ namespace Kodbruket\VsfKco\Controller\Order;
 
 use Klarna\Core\Api\OrderRepositoryInterface;
 use Klarna\Core\Model\OrderFactory;
-use Kodbruket\VsfKco\Model\ExtensionConstants;
 use Kodbruket\VsfKco\Model\Klarna\DataTransform\Request\Address;
 use Magento\Customer\Api\CustomerRepositoryInterface;
 use Magento\Customer\Model\CustomerFactory;
@@ -17,7 +16,6 @@ use Magento\Framework\App\ResponseInterface;
 use Magento\Framework\Controller\ResultFactory;
 use Magento\Framework\DataObject;
 use Magento\Quote\Api\CartRepositoryInterface;
-use Magento\Quote\Model\QuoteRepository as MageQuoteRepository;
 use Magento\Quote\Api\Data\CartInterface;
 use Magento\Quote\Model\QuoteIdMask;
 use Magento\Quote\Model\QuoteIdMaskFactory;
@@ -37,11 +35,6 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
      * @var CartRepositoryInterface
      */
     private $cartRepository;
-
-    /**
-     * @var MageQuoteRepository
-     */
-    private $mageQuoteRepository;
 
     /**
      * @var DataObject
@@ -93,7 +86,6 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
      * @param Context $context
      * @param LoggerInterface $logger
      * @param CartRepositoryInterface $cartRepository
-     * @param MageQuoteRepository $mageQuoteRepository
      * @param Address $addressDataTransform
      * @param OrderFactory $klarnaOrderFactory
      * @param CustomerFactory $customerFactory
@@ -107,7 +99,6 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
         Context $context,
         LoggerInterface $logger,
         CartRepositoryInterface $cartRepository,
-        MageQuoteRepository $mageQuoteRepository,
         Address $addressDataTransform,
         OrderFactory $klarnaOrderFactory,
         CustomerFactory $customerFactory,
@@ -122,7 +113,6 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
         );
         $this->logger = $logger;
         $this->cartRepository = $cartRepository;
-        $this->mageQuoteRepository = $mageQuoteRepository;
         $this->addressDataTransform = $addressDataTransform;
         $this->klarnaOrderFactory = $klarnaOrderFactory;
         $this->klarnaOrderRepository = $klarnaOrderRepository;
@@ -146,9 +136,8 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
     {
         $data = $this->getKlarnaRequestData();
         $quoteId = $this->getQuoteId();
-        $quote = $this->mageQuoteRepository->get($quoteId);
+        $quote = $this->cartRepository->get($quoteId);
         $shippingMethodCode = null;
-        $shippingDescription = "Shipping";
 
         $this->logger->info("Shipping option update (" . $quote->getId() . "):\n" . var_export($data, true));
 
@@ -157,7 +146,7 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
                 $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
 
                 $quote->setExtShippingInfo($shippingMethodString);
-                $this->mageQuoteRepository->save($quote);
+
 
                 if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
                     $shippingMethodCode = $shippingMethod['id'];
@@ -165,7 +154,6 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
                     $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'].'_'.$shippingMethod['delivery_details']['class']);
                 }
 
-                $shippingDescription = $shippingMethod['name'];
             } else {
                 if ($shippingMethod = $this->getShippingMedthodFromOrderLines($data)) {
                     $shippingMethodCode = $shippingMethod['reference'];
@@ -173,13 +161,13 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
             }
 
             if (isset($shippingMethodCode)) {
-                $quote->setTotalsCollectedFlag(false);
-                $quote->getShippingAddress()->setCollectShippingRates(true)->collectShippingRates();;
-                $quote->getShippingAddress()->setShippingMethod($shippingMethodCode);
-                $quote->getShippingAddress()->setShippingDescription($shippingDescription);
-                $quote->getShippingAddress()->save();
-                $quote->collectTotals();
+                $quote->getShippingAddress()
+                    ->setShippingMethod($this->convertShippingMethodCode($shippingMethodCode))
+                    ->setCollectShippingRates(true)
+                    ->collectShippingRates()
+                ;
             }
+            $this->cartRepository->save($quote);
 
         } catch (\Exception $e) {
             $this->logger->info($e->getMessage());
@@ -188,44 +176,49 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
         $orderLines = $data->getOrderLines();
         $i = 0;
 
-        foreach ($orderLines as $orderLine) {
-            if ($orderLine['type'] == 'shipping_fee') {
-                unset($orderLines[$i]);
+        if ($shippingMethod = $data->getData('selected_shipping_option')) {
+            foreach ($orderLines as $orderLine) {
+                if ($orderLine['type'] == 'shipping_fee') {
+                    unset($orderLines[$i]);
+                }
+                $i++;
             }
-            $i++;
+
+            $this->logger->info("Quote data after update shipping option:". $quote->getShippingAddress()->getShippingDescription());
+
+            $orderLines[] = [
+                'type' => 'shipping_fee',
+                'name' => $quote->getShippingAddress()->getShippingDescription(),
+                'quantity' => 1,
+                'unit_price' => intval($quote->getShippingAddress()->getShippingInclTax() * 100),
+                'tax_rate' => 2500,
+                'total_amount' =>  intval($quote->getShippingAddress()->getShippingInclTax() * 100.0),
+                'total_tax_amount' => intval( $quote->getShippingAddress()->getShippingTaxAmount() * 100)
+            ];
+
+            $data->setOrderLines(array_values($orderLines));
+
+            $data->setOrderAmount(intval(round($quote->getShippingAddress()->getGrandTotal() * 100)));
+            $data->setOrderTaxAmount(intval(round($quote->getShippingAddress()->getTaxAmount() * 100)));
+
+            $keepData = [
+                'order_amount',
+                'order_tax_amount',
+                'order_lines',
+                'purchase_currency'
+            ];
+
+            $array = $data->toArray();
+
+            foreach ($array as $key => $value) {
+                if (in_array($key, $keepData)) {
+                    continue;
+                } else {
+                    unset($array[$key]);
+                }
+            }
         }
 
-        $orderLines[] = [
-            'type' => 'shipping_fee',
-            'name' => $quote->getShippingAddress()->getShippingDescription(),
-            'quantity' => 1,
-            'unit_price' => intval($quote->getShippingAddress()->getShippingInclTax() * 100),
-            'tax_rate' => 2500,
-            'total_amount' =>  intval($quote->getShippingAddress()->getShippingInclTax() * 100.0),
-            'total_tax_amount' => intval( $quote->getShippingAddress()->getShippingTaxAmount() * 100)
-       ];
-
-       $data->setOrderLines(array_values($orderLines));
-
-       $data->setOrderAmount(intval(round($quote->getShippingAddress()->getGrandTotal() * 100)));
-       $data->setOrderTaxAmount(intval(round($quote->getShippingAddress()->getTaxAmount() * 100)));
-
-       $keepData = [
-           'order_amount',
-           'order_tax_amount',
-           'order_lines',
-           'purchase_currency'
-       ];
-
-       $array = $data->toArray();
-
-       foreach ($array as $key => $value) {
-           if (in_array($key, $keepData)) {
-               continue;
-           } else {
-               unset($array[$key]);
-           }
-       }
 
        return $this->resultFactory->create(ResultFactory::TYPE_JSON)
             ->setJsonData($data->toJson())
@@ -287,57 +280,6 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
             }
         }
         return false;
-    }
-
-    /**
-     * @param DataObject $checkoutData
-     * @param \Magento\Quote\Model\Quote|CartInterface $quote
-     * @throws \Magento\Framework\Exception\LocalizedException
-     * @throws \Magento\Framework\Exception\NoSuchEntityException
-     */
-    private function updateOrderAddresses(DataObject $checkoutData, CartInterface $quote)
-    {
-        if (!$checkoutData->hasBillingAddress() && !$checkoutData->hasShippingAddress()) {
-            return;
-        }
-
-        $sameAsOther = $checkoutData->getShippingAddress() == $checkoutData->getBillingAddress();
-        $billingAddress = new DataObject($checkoutData->getBillingAddress());
-        $billingAddress->setSameAsOther($sameAsOther);
-        $shippingAddress = new DataObject($checkoutData->getShippingAddress());
-        $shippingAddress->setSameAsOther($sameAsOther);
-
-        if (!$quote->getCustomerId()) {
-            $websiteId = $quote->getStore()->getWebsiteId();
-            $customer = $this->customerFactory->create();
-            $customer->setWebsiteId($websiteId);
-            $customer->loadByEmail($billingAddress->getEmail());
-            if (!$customer->getEntityId()) {
-                $customer->setWebsiteId($websiteId)
-                    ->setStore($quote->getStore())
-                    ->setFirstname($billingAddress->getGivenName())
-                    ->setLastname($billingAddress->getFamilyName())
-                    ->setEmail($billingAddress->getEmail())
-                    ->setPassword($billingAddress->getEmail());
-                $customer->save();
-            }
-            $customer = $this->customerRepository->getById($customer->getEntityId());
-            $quote->assignCustomer($customer);
-        }
-
-        $quote->getBillingAddress()->addData(
-            $this->addressDataTransform->prepareMagentoAddress($billingAddress)
-        );
-
-        /**
-         * @todo  check use 'Billing as shiiping'
-         */
-        if ($checkoutData->hasShippingAddress()) {
-            $quote->setTotalsCollectedFlag(false);
-            $quote->getShippingAddress()->addData(
-                $this->addressDataTransform->prepareMagentoAddress($shippingAddress)
-            );
-        }
     }
 
     /**
