@@ -157,7 +157,7 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
                 $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
 
                 $quote->setExtShippingInfo($shippingMethodString);
-                $this->mageQuoteRepository->save($quote);
+
 
                 if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
                     $shippingMethodCode = $shippingMethod['id'];
@@ -171,15 +171,15 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
                     $shippingMethodCode = $shippingMethod['reference'];
                 }
             }
-
+            $this->logger->info('ShippingMethodCode in SOU: '.$shippingMethodCode);
             if (isset($shippingMethodCode)) {
                 $quote->setTotalsCollectedFlag(false);
                 $quote->getShippingAddress()->setCollectShippingRates(true)->collectShippingRates();;
                 $quote->getShippingAddress()->setShippingMethod($shippingMethodCode);
                 $quote->getShippingAddress()->setShippingDescription($shippingDescription);
-                $quote->getShippingAddress()->save();
                 $quote->collectTotals();
             }
+            $this->mageQuoteRepository->save($quote);
 
         } catch (\Exception $e) {
             $this->logger->info($e->getMessage());
