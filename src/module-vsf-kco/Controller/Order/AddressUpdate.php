@@ -170,6 +170,8 @@ class AddressUpdate extends Action implements CsrfAwareActionInterface
         }
 
         $this->cartRepository->save($quote);
+        $data->setOrderAmount(intval(round($quote->getShippingAddress()->getGrandTotal() * 100)));
+        $data->setOrderTaxAmount(intval(round($quote->getShippingAddress()->getTaxAmount() * 100)));
 
         return $this->resultFactory->create(ResultFactory::TYPE_JSON)
             ->setData($data)
