@@ -173,13 +173,16 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
             }
             $this->logger->info('ShippingMethodCode in SOU: '.$shippingMethodCode);
             if (isset($shippingMethodCode)) {
-                $quote->setTotalsCollectedFlag(false);
-                $quote->getShippingAddress()->setCollectShippingRates(true)->collectShippingRates();;
-                $quote->getShippingAddress()->setShippingMethod($shippingMethodCode);
-                $quote->getShippingAddress()->setShippingDescription($shippingDescription);
-                $quote->collectTotals();
+                $quote->getShippingAddress()
+                ->setShippingMethod($shippingMethodCode)
+                ->setShippingDescription($shippingDescription)
+                ->setCollectShippingRates(true)
+                ->collectShippingRates();
             }
-            $this->mageQuoteRepository->save($quote);
+
+            $quote->setTotalsCollectedFlag(false)
+                ->collectTotals()
+                ->save();
 
         } catch (\Exception $e) {
             $this->logger->info($e->getMessage());

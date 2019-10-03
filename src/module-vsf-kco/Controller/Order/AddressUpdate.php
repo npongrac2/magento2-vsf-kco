@@ -162,14 +162,18 @@ class AddressUpdate extends Action implements CsrfAwareActionInterface
         }
 
         if (isset($shippingMethodCode)) {
-            $this->logger->info('Shipping method code:' . $this->convertShippingMethodCode($shippingMethodCode));
+            $shippingMethodCode = $this->convertShippingMethodCode($shippingMethodCode);
+            $this->logger->info('Shipping method code:' . $shippingMethodCode);
             $quote->getShippingAddress()
-                ->setShippingMethod($this->convertShippingMethodCode($shippingMethodCode))
+                ->setShippingMethod($shippingMethodCode)
                 ->setCollectShippingRates(true)
                 ->collectShippingRates();
         }
 
-        $this->cartRepository->save($quote);
+        $quote->setTotalsCollectedFlag(false)
+            ->collectTotals()
+            ->save();
+
         $data->setOrderAmount(intval(round($quote->getShippingAddress()->getGrandTotal() * 100)));
         $data->setOrderTaxAmount(intval(round($quote->getShippingAddress()->getTaxAmount() * 100)));
 
