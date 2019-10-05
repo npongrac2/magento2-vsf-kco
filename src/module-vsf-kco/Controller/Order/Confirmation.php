@@ -19,7 +19,6 @@ use Magento\Store\Model\ScopeInterface;
 use Magento\Store\Model\StoreManagerInterface;
 use Psr\Log\LoggerInterface;
 
-
 class Confirmation extends Action implements CsrfAwareActionInterface
 {
 
@@ -91,8 +90,8 @@ class Confirmation extends Action implements CsrfAwareActionInterface
         Ordermanagement $orderManagement,
         StoreManagerInterface $storeManager,
         QuoteIdMaskFactory $quoteIdMaskFactory,
-        ScopeConfigInterface $scopeConfig
-
+        ScopeConfigInterface $scopeConfig,
+        ConfigHelper $helper
     ) {
         $this->logger = $logger;
         $this->klarnaOrderFactory = $klarnaOrderFactory;
@@ -103,6 +102,7 @@ class Confirmation extends Action implements CsrfAwareActionInterface
         $this->storeManager = $storeManager;
         $this->quoteIdMaskFactory = $quoteIdMaskFactory;
         $this->scopeConfig = $scopeConfig;
+        $this->helper = $helper;
 
         parent::__construct(
             $context
@@ -112,20 +112,24 @@ class Confirmation extends Action implements CsrfAwareActionInterface
     public function execute()
     {
         $klarnaOrderId = $this->getRequest()->getParam('id');
-        $this->logger->info('Confirmation Klarna Order Id: ' . $klarnaOrderId);
-        $store = $this->storeManager->getStore();
+
         if (!$klarnaOrderId) {
-            $this->logger->info('Klarna Order ID is required');
+            $this->logger->info('Klarna order ID is required for confirmation.');
             return;
         }
+
+        $this->logger->info('Confirmation for Klarna order ID: ' . $klarnaOrderId);
+
+        $store = $this->storeManager->getStore();
         $klarnaOrder = $this->klarnaOrderRepository->getByKlarnaOrderId($klarnaOrderId);
 
         if ($klarnaOrder->getOrderId()) {
-            $this->logger->info('Error: Order already exists in Magento: ' . $klarnaOrder->getOrderId());
+            $this->logger->info('Order already exists in Magento for Klarna order ID: ' . $klarnaOrder->getOrderId());
             return;
         }
+
         if ($klarnaOrder->getIsAcknowledged()) {
-            $this->logger->info('Error: Order ' . $klarnaOrderId . ' has been acknowledged');
+            $this->logger->info('Klarna order ID ' . $klarnaOrderId . ' has already been acknowledged.');
             return;
         }
 
@@ -135,7 +139,42 @@ class Confirmation extends Action implements CsrfAwareActionInterface
         $quoteIdMask = $this->quoteIdMaskFactory->create()->load($maskedId, 'masked_id');
         $quoteId = $quoteIdMask->getQuoteId();
         $quote = $this->cartRepository->get($quoteId);
+
+        $store = $quote->getStoreId();
+        $user = $this->helper->getApiConfig('merchant_id', $store);
+        $password = $this->helper->getApiConfig('shared_secret', $store);
+        $testMode = $this->helper->isApiConfigFlag('test_mode', $store);
+
+        if ($testMode) {
+            $url = 'https://api.playground.klarna.com/checkout/v3/orders/';
+        } else {
+            $url = 'https://api.klarna.com/checkout/v3/orders/';
+        }
+
+        $auth = base64_encode(sprintf("%s:%s", $user, $password));
+        $context = stream_context_create([
+            "http" => [
+                "header" => "Authorization: Basic $auth"
+            ]
+        ]);
+        $result = file_get_contents(
+            $url . $klarnaOrderId,
+            false,
+            $context
+        );
+        $kco = json_decode($result, true);
+
+        if ($shippingMethod = $kco['selected_shipping_option']) {
+            $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
+
+            if ($quote->getExtShippingInfo() != $shippingMethodString) {
+                $quote->setExtShippingInfo($shippingMethodString);
+                $quote->save();
+            }
+        }
+
         $resultRedirect = $this->resultRedirectFactory->create();
+
         if ($quote->getId()) {
             try {
                 $order = $this->quoteManagement->submit($quote);
@@ -153,6 +192,7 @@ class Confirmation extends Action implements CsrfAwareActionInterface
                 $this->orderManagement->cancel($klarnaOrderId);
             }
         }
+
         $failedUrl = $this->scopeConfig->getValue('klarna/vsf/failed_link', ScopeInterface::SCOPE_STORES, $store);
         $resultRedirect->setUrl($failedUrl);
 
