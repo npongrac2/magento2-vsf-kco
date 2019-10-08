@@ -150,19 +150,16 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
         $shippingMethodCode = null;
         $shippingDescription = "Shipping";
 
-        $this->logger->info("Shipping option update (" . $quote->getId() . "):\n" . var_export($data, true));
-
         try {
             if ($shippingMethod = $data->getData('selected_shipping_option')) {
                 $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
 
                 $quote->setExtShippingInfo($shippingMethodString);
 
-
                 if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
                     $shippingMethodCode = $shippingMethod['id'];
                 } else {
-                    $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'].'_'.$shippingMethod['delivery_details']['class']);
+                    $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'] . '_' . $shippingMethod['delivery_details']['class']);
                 }
 
                 $shippingDescription = $shippingMethod['name'];
@@ -171,13 +168,13 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
                     $shippingMethodCode = $shippingMethod['reference'];
                 }
             }
-            $this->logger->info('ShippingMethodCode in SOU: '.$shippingMethodCode);
+
             if (isset($shippingMethodCode)) {
                 $quote->getShippingAddress()
-                ->setShippingMethod($shippingMethodCode)
-                ->setShippingDescription($shippingDescription)
-                ->setCollectShippingRates(true)
-                ->collectShippingRates();
+                    ->setShippingMethod($shippingMethodCode)
+                    ->setShippingDescription($shippingDescription)
+                    ->setCollectShippingRates(true)
+                    ->collectShippingRates();
             }
 
             $quote->setTotalsCollectedFlag(false)
@@ -198,37 +195,24 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
             $i++;
         }
 
+        $unitPrice = intval($quote->getShippingAddress()->getShippingInclTax() * 100);
+        $totalAmount = intval($quote->getShippingAddress()->getShippingInclTax() * 100);
+        $totalTaxAmount = intval($quote->getShippingAddress()->getShippingTaxAmount() * 100);
+        $taxRate = $totalTaxAmount ? intval($totalTaxAmount / ($totalAmount - $totalTaxAmount) * 100 * 100) : 0;
+
         $orderLines[] = [
             'type' => 'shipping_fee',
             'name' => $quote->getShippingAddress()->getShippingDescription(),
             'quantity' => 1,
-            'unit_price' => intval($quote->getShippingAddress()->getShippingInclTax() * 100),
-            'tax_rate' => 2500,
-            'total_amount' =>  intval($quote->getShippingAddress()->getShippingInclTax() * 100.0),
-            'total_tax_amount' => intval( $quote->getShippingAddress()->getShippingTaxAmount() * 100)
+            'unit_price' => $unitPrice,
+            'tax_rate' => $taxRate,
+            'total_amount' =>  $totalAmount,
+            'total_tax_amount' => $totalTaxAmount
        ];
 
        $data->setOrderLines(array_values($orderLines));
-
        $data->setOrderAmount(intval(round($quote->getShippingAddress()->getGrandTotal() * 100)));
        $data->setOrderTaxAmount(intval(round($quote->getShippingAddress()->getTaxAmount() * 100)));
-
-       $keepData = [
-           'order_amount',
-           'order_tax_amount',
-           'order_lines',
-           'purchase_currency'
-       ];
-
-       $array = $data->toArray();
-
-       foreach ($array as $key => $value) {
-           if (in_array($key, $keepData)) {
-               continue;
-           } else {
-               unset($array[$key]);
-           }
-       }
 
        return $this->resultFactory->create(ResultFactory::TYPE_JSON)
             ->setJsonData($data->toJson())
