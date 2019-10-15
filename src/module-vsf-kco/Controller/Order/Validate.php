@@ -101,6 +101,10 @@ class Validate extends Action implements CsrfAwareActionInterface
         $this->storeManager = $storeManager;
     }
 
+    /**
+     * @return ResponseInterface|\Magento\Framework\Controller\Result\Redirect|\Magento\Framework\Controller\ResultInterface
+     * @throws \Magento\Framework\Exception\NoSuchEntityException
+     */
     public function execute()
     {
         $this->logger->info('Validate: start');
@@ -146,7 +150,6 @@ class Validate extends Action implements CsrfAwareActionInterface
                     $shippingMethodCode = $shippingMethod['reference'];
                 }
             }
-
 
             $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
             $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
