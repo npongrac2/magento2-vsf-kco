@@ -170,6 +170,7 @@ class ShippingOptionUpdate extends Action implements CsrfAwareActionInterface
             }
 
             if (isset($shippingMethodCode)) {
+                $shippingMethodCode = $this->convertShippingMethodCode($shippingMethodCode);
                 $quote->getShippingAddress()
                     ->setShippingMethod($shippingMethodCode)
                     ->setShippingDescription($shippingDescription)

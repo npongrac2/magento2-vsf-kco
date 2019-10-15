@@ -102,12 +102,7 @@ class Validate extends Action implements CsrfAwareActionInterface
     }
 
     /**
-     * Execute action based on request and return result
-     *
-     * Note: Request will be added as operation argument in future
-     *
-     * @return \Magento\Framework\Controller\ResultInterface|ResponseInterface
-     * @throws \Magento\Framework\Exception\NotFoundException
+     * @return ResponseInterface|\Magento\Framework\Controller\Result\Redirect|\Magento\Framework\Controller\ResultInterface
      * @throws \Magento\Framework\Exception\NoSuchEntityException
      */
     public function execute()
@@ -117,6 +112,9 @@ class Validate extends Action implements CsrfAwareActionInterface
             $this->logger->info('Validate: No post request');
             return $this->setValidateFailedResponse();
         }
+
+        $shippingMethodCode = null;
+        $shippingDescription = "Shipping";
 
         $klarnaOderId = $this->getKlarnaOrderId();
 
@@ -128,7 +126,30 @@ class Validate extends Action implements CsrfAwareActionInterface
 
         try {
             $checkoutData = $this->getKlarnaRequestData();
+
             $this->logger->info('Input request :' . print_r($checkoutData->toArray(), true));
+
+            /**
+             *  Load shipping method from Klarna request
+             */
+            if ($shippingMethod = $checkoutData->getData('selected_shipping_option')) {
+
+                $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
+
+                $quote->setExtShippingInfo($shippingMethodString);
+
+                if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
+                    $shippingMethodCode = $shippingMethod['id'];
+                } else {
+                    $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'] . '_' . $shippingMethod['delivery_details']['class']);
+                }
+
+                $shippingDescription = $shippingMethod['name'];
+            } else {
+                if ($shippingMethod = $this->getShippingMedthodFromOrderLines($checkoutData)) {
+                    $shippingMethodCode = $shippingMethod['reference'];
+                }
+            }
 
             $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
             $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
@@ -147,6 +168,22 @@ class Validate extends Action implements CsrfAwareActionInterface
                 'reservation_id' => $klarnaOderId,
             ]);
             $this->klarnaOrderRepository->save($klarnaOrder);
+
+            /**
+             *  set selectedShippingMethod from Klarna to Magento2
+             */
+            if (isset($shippingMethodCode)) {
+                $shippingMethodCode = $this->convertShippingMethodCode($shippingMethodCode);
+                $quote->getShippingAddress()
+                    ->setShippingMethod($shippingMethodCode)
+                    ->setShippingDescription($shippingDescription)
+                    ->setCollectShippingRates(true)
+                    ->collectShippingRates();
+            }
+
+            $quote->setTotalsCollectedFlag(false)
+                ->collectTotals()
+                ->save();
 
             return $this->resultFactory->create(ResultFactory::TYPE_RAW)->setHttpResponseCode(200);
         } catch (\Exception $exception) {
@@ -211,7 +248,7 @@ class Validate extends Action implements CsrfAwareActionInterface
 
     /**
      * Create CSRF validation exception
-     * 
+     *
      * @param RequestInterface $request
      *
      * @return InvalidRequestException|null
@@ -223,7 +260,7 @@ class Validate extends Action implements CsrfAwareActionInterface
 
     /**
      * Validate for CSRF
-     * 
+     *
      * @param RequestInterface $request
      *
      * @return bool|null
@@ -231,5 +268,52 @@ class Validate extends Action implements CsrfAwareActionInterface
     public function validateForCsrf(RequestInterface $request): ?bool
     {
         return true;
+    }
+
+    /**
+     * @param $carrierClass
+     * @return string
+     * @throws \Magento\Framework\Exception\NoSuchEntityException
+     */
+    private function getShippingFromKSSCarrierClass($carrierClass) {
+        $store = $this->storeManager->getStore();
+        $mappings = $this->scopeConfig->getValue('klarna/vsf/carrier_mapping', ScopeInterface::SCOPE_STORES, $store);
+        if ($mappings) {
+            $mappings = json_decode($mappings, true);
+            foreach($mappings as $item) {
+                if($item['kss_carrier'] == $carrierClass) {
+                    return $item['shipping_method'];
+                }
+            }
+        }
+        return '';
+    }
+
+    /**
+     * @param DataObject $checkoutData
+     * @return bool|mixed
+     */
+    private function getShippingMedthodFromOrderLines(DataObject $checkoutData)
+    {
+        $orderLines = $checkoutData->getData('order_lines');
+
+        if (is_array($orderLines)) {
+            foreach ($orderLines as $line) {
+                if (isset($line['type']) && $line['reference'] && $line['type'] === 'shipping_fee') {
+                    return $line;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param $shippingCode
+     * @return string
+     */
+    private function convertShippingMethodCode($shippingCode)
+    {
+        if (!strpos($shippingCode, '_')) return $shippingCode . '_' . $shippingCode;
+        return $shippingCode;
     }
 }
