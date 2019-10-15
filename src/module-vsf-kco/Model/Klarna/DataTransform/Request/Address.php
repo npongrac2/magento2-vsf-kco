@@ -49,7 +49,10 @@ class Address
             : $klarnaAddressDto->getCareOf();
 
 
-        $region = $this->region->loadByCode($klarnaAddressDto->getRegion(), $country);
+        $region = $this->region->loadByName($klarnaAddressDto->getRegion(), $country);
+        if (empty($region->getId())) {
+            $region = $this->region->loadByCode($klarnaAddressDto->getRegion(), $country);
+        }
 
         $data = [
             'lastname'      => $klarnaAddressDto->getFamilyName(),
