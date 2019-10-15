@@ -101,15 +101,6 @@ class Validate extends Action implements CsrfAwareActionInterface
         $this->storeManager = $storeManager;
     }
 
-    /**
-     * Execute action based on request and return result
-     *
-     * Note: Request will be added as operation argument in future
-     *
-     * @return \Magento\Framework\Controller\ResultInterface|ResponseInterface
-     * @throws \Magento\Framework\Exception\NotFoundException
-     * @throws \Magento\Framework\Exception\NoSuchEntityException
-     */
     public function execute()
     {
         $this->logger->info('Validate: start');
@@ -137,11 +128,25 @@ class Validate extends Action implements CsrfAwareActionInterface
             /**
              *  Load shipping method from Klarna request
              */
-            if ( array_key_exists('selected_shipping_option', $checkoutData->toArray()) ) {
-                $selectedShippingMethod =  $checkoutData->toArray()['selected_shipping_option'];
+            if ($shippingMethod = $checkoutData->getData('selected_shipping_option')) {
 
-                $shippingMethodCode = $this->getShippingFromKSSCarrierClass($selectedShippingMethod['delivery_details']['carrier'] . '_' . $selectedShippingMethod['delivery_details']['class']);
+                $shippingMethodString = json_encode($shippingMethod, JSON_UNESCAPED_UNICODE);
+
+                $quote->setExtShippingInfo($shippingMethodString);
+
+                if (empty($shippingMethod) || !(array_key_exists('carrier', $shippingMethod['delivery_details']) && array_key_exists('class', $shippingMethod['delivery_details']))) {
+                    $shippingMethodCode = $shippingMethod['id'];
+                } else {
+                    $shippingMethodCode = $this->getShippingFromKSSCarrierClass($shippingMethod['delivery_details']['carrier'] . '_' . $shippingMethod['delivery_details']['class']);
+                }
+
+                $shippingDescription = $shippingMethod['name'];
+            } else {
+                if ($shippingMethod = $this->getShippingMedthodFromOrderLines($checkoutData)) {
+                    $shippingMethodCode = $shippingMethod['reference'];
+                }
             }
+
 
             $quote->setData(ExtensionConstants::FORCE_ORDER_PLACE, true);
             $quote->getShippingAddress()->setPaymentMethod(\Klarna\Kp\Model\Payment\Kp::METHOD_CODE);
@@ -165,6 +170,7 @@ class Validate extends Action implements CsrfAwareActionInterface
              *  set selectedShippingMethod from Klarna to Magento2
              */
             if (isset($shippingMethodCode)) {
+                $shippingMethodCode = $this->convertShippingMethodCode($shippingMethodCode);
                 $quote->getShippingAddress()
                     ->setShippingMethod($shippingMethodCode)
                     ->setShippingDescription($shippingDescription)
@@ -278,5 +284,33 @@ class Validate extends Action implements CsrfAwareActionInterface
             }
         }
         return '';
+    }
+
+    /**
+     * @param DataObject $checkoutData
+     * @return bool|mixed
+     */
+    private function getShippingMedthodFromOrderLines(DataObject $checkoutData)
+    {
+        $orderLines = $checkoutData->getData('order_lines');
+
+        if (is_array($orderLines)) {
+            foreach ($orderLines as $line) {
+                if (isset($line['type']) && $line['reference'] && $line['type'] === 'shipping_fee') {
+                    return $line;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * @param $shippingCode
+     * @return string
+     */
+    private function convertShippingMethodCode($shippingCode)
+    {
+        if (!strpos($shippingCode, '_')) return $shippingCode . '_' . $shippingCode;
+        return $shippingCode;
     }
 }
