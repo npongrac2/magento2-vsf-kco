@@ -15,6 +15,7 @@ use Magento\Quote\Api\CartRepositoryInterface;
 use Magento\Quote\Model\QuoteIdMaskFactory;
 use Magento\Quote\Model\QuoteManagement;
 use Magento\Store\Model\StoreManagerInterface;
+use Magento\Sales\Api\OrderRepositoryInterface as MageOrderRepositoryInterface;
 use Psr\Log\LoggerInterface;
 
 
@@ -63,6 +64,11 @@ class Push extends Action implements CsrfAwareActionInterface
     private $quoteIdMaskFactory;
 
     /**
+     * @var MageOrderRepositoryInterface
+     */
+    private $mageOrderRepository;
+
+    /**
      * Push constructor.
      * @param Context $context
      * @param LoggerInterface $logger
@@ -73,6 +79,7 @@ class Push extends Action implements CsrfAwareActionInterface
      * @param Ordermanagement $orderManagement
      * @param StoreManagerInterface $storeManager
      * @param QuoteIdMaskFactory $quoteIdMaskFactory
+     * @param MageOrderRepositoryInterface $mageOrderRepository
      */
 
     public function __construct(
@@ -84,7 +91,8 @@ class Push extends Action implements CsrfAwareActionInterface
         CartRepositoryInterface $cartRepository,
         Ordermanagement $orderManagement,
         StoreManagerInterface $storeManager,
-        QuoteIdMaskFactory $quoteIdMaskFactory
+        QuoteIdMaskFactory $quoteIdMaskFactory,
+        MageOrderRepositoryInterface $mageOrderRepository
     ) {
         $this->logger = $logger;
         $this->klarnaOrderFactory = $klarnaOrderFactory;
@@ -94,6 +102,7 @@ class Push extends Action implements CsrfAwareActionInterface
         $this->orderManagement = $orderManagement;
         $this->storeManager = $storeManager;
         $this->quoteIdMaskFactory = $quoteIdMaskFactory;
+        $this->mageOrderRepository = $mageOrderRepository;
         parent::__construct(
             $context
         );
@@ -149,8 +158,9 @@ class Push extends Action implements CsrfAwareActionInterface
     {
         if ($klarnaOrderId && $orderId && $quoteId) {
             try {
+                $mageOrder = $this->mageOrderRepository->get($orderId);
                 $klarnaOrder = $this->klarnaOrderRepository->getByKlarnaOrderId($klarnaOrderId);
-                $this->orderManagement->updateMerchantReferences($klarnaOrderId, $orderId, $quoteId);
+                $this->orderManagement->updateMerchantReferences($klarnaOrderId, $mageOrder->getIncrementId(), $quoteId);
                 $this->orderManagement->acknowledgeOrder($klarnaOrderId);
                 $klarnaOrder->setOrderId($orderId)
                     ->setIsAcknowledged(true)
@@ -168,7 +178,7 @@ class Push extends Action implements CsrfAwareActionInterface
 
     /**
      * Create CSRF validation exception
-     * 
+     *
      * @param RequestInterface $request
      *
      * @return InvalidRequestException|null
@@ -180,7 +190,7 @@ class Push extends Action implements CsrfAwareActionInterface
 
     /**
      * Validate for CSRF
-     * 
+     *
      * @param RequestInterface $request
      *
      * @return bool|null
