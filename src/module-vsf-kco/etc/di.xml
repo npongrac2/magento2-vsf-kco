@@ -36,4 +36,19 @@
             <argument name="log" xsi:type="object">klarnaCallbackLogger</argument>
         </arguments>
     </type>
+
+    <preference
+            for="Kodbruket\VsfKco\Api\Data\ValidateQuoteRequestInterface"
+            type="Kodbruket\VsfKco\Model\Data\ValidateQuoteRequestRepository"
+    />
+
+    <preference
+            for="Kodbruket\VsfKco\Api\Data\ResponseValidateInterface"
+            type="Kodbruket\VsfKco\Model\Data\ResponseRepository"
+    />
+
+    <preference
+            for="Kodbruket\VsfKco\Api\ValidateQuoteInterface"
+            type="Kodbruket\VsfKco\Model\ValidateQuoteRepository"
+    />
 </config>
