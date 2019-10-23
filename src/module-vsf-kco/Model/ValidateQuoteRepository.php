@@ -73,6 +73,21 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
     private $logger;
 
     /**
+     * @var \Klarna\Core\Helper\KlarnaConfig
+     */
+    private $klarnaConfig;
+
+    /**
+     * @var \Klarna\Core\Helper\VersionInfo
+     */
+    private $versionInfo;
+
+    /**
+     * @var \Magento\Store\Api\Data\StoreInterface
+     */
+    private $store;
+
+    /**
      * ValidateQuoteRepository constructor.
      * @param \Magento\Framework\Webapi\Rest\Request $request
      * @param \Magento\Quote\Api\CartTotalRepositoryInterface $cartTotalManagement
@@ -86,6 +101,9 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
      * @param \Klarna\Kp\Model\Api\Builder\Kasper $klarnaApiBuilder
      * @param ServiceInterface $klarnaApiService
      * @param \Kodbruket\VsfKco\Logger\Logger $logger
+     * @param \Klarna\Core\Helper\KlarnaConfig $klarnaConfig
+     * @param \Klarna\Core\Helper\VersionInfo $versionInfo
+     * @throws \Magento\Framework\Exception\NoSuchEntityException
      */
     public function __construct(
         \Magento\Framework\Webapi\Rest\Request $request,
@@ -99,7 +117,9 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
         \Klarna\Ordermanagement\Model\Api\Rest\Service\Ordermanagement $klanaOrdermanagement,
         \Klarna\Kp\Model\Api\Builder\Kasper $klarnaApiBuilder,
         \Klarna\Core\Api\ServiceInterface $klarnaApiService,
-        \Kodbruket\VsfKco\Logger\Logger $logger
+        \Kodbruket\VsfKco\Logger\Logger $logger,
+        \Klarna\Core\Helper\KlarnaConfig $klarnaConfig,
+        \Klarna\Core\Helper\VersionInfo $versionInfo
     )
     {
         $this->request                          = $request;
@@ -114,6 +134,9 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
         $this->storeManager                     = $storeManager;
         $this->scopeConfig                      = $scopeConfig;
         $this->logger                           = $logger;
+        $this->klarnaConfig                     = $klarnaConfig;
+        $this->versionInfo                      = $versionInfo;
+        $this->store                            = $storeManager->getStore();
     }
 
     /**
@@ -131,8 +154,10 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
         try {
 
             /** Fetch order from Klarna to check with Magento 2 */
+            $this->connect();
+            $url = "/checkout/v3/orders/{$klarnaOrderId}";
             $klarnaOrder = $this->klarnaApiService->makeRequest(
-                "/checkout/v3/orders/{$klarnaOrderId}",
+                $url,
                 '',
                 ServiceInterface::GET,
                 $klarnaOrderId
@@ -320,5 +345,33 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
             ->save();
 
         return $m2Quote;
+    }
+
+    /**
+     *
+     */
+    private function connect()
+    {
+        $version = sprintf(
+            '%s;Core/%s;OM/%s',
+            $this->versionInfo->getVersion('Klarna_Kp'),
+            $this->versionInfo->getVersion('Klarna_Core'),
+            $this->versionInfo->getVersion('Klarna_Ordermanagement')
+        );
+        $mageMode = $this->versionInfo->getMageMode();
+        $mageVersion = $this->versionInfo->getMageEdition() . '/' . $this->versionInfo->getMageVersion();
+        $mageInfo = "Magento {$mageVersion} {$mageMode} mode";
+        $this->klarnaApiService->setUserAgent('Magento2_KP', $version, $mageInfo);
+        $this->klarnaApiService->setHeader('Accept', '*/*');
+
+        $username = $this->scopeConfig->getValue('klarna/api/merchant_id', ScopeInterface::SCOPE_STORES, $this->store);
+        $password = $this->scopeConfig->getValue('klarna/api/shared_secret', ScopeInterface::SCOPE_STORES, $this->store);
+        $test_mode = $this->scopeConfig->getValue('klarna/api/test_mode', ScopeInterface::SCOPE_STORES, $this->store);
+
+        $versionConfig = $this->klarnaConfig->getVersionConfig($this->store);
+        $url = $versionConfig->getUrl($test_mode);
+
+        $this->klarnaApiService->connect($username, $password, $url);
+        return $this;
     }
 }
