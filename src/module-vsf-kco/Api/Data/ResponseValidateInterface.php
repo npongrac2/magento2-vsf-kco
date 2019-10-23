@@ -10,6 +10,17 @@ interface ResponseValidateInterface
     /**
      *
      */
+    CONST ERROR = 'error';
+
+    /**
+     *
+     */
+    CONST MESSAGE = 'message';
+
+
+    /**
+     *
+     */
     CONST IS_UPDATED_KLARNA = 'is_updated_klarna';
 
     /**
@@ -26,6 +37,28 @@ interface ResponseValidateInterface
      *
      */
     CONST QUOTE_TOTAL_DATA = 'quote_total_data';
+
+    /**
+     * @param boolean $value
+     * @return boolean
+     */
+    public function setError($value);
+
+    /**
+     * @return boolean
+     */
+    public function getError();
+
+    /**
+     * @param string $value
+     * @return boolean
+     */
+    public function setMessage($value);
+
+    /**
+     * @return string
+     */
+    public function getMessage();
 
     /**
      * @param boolean $value

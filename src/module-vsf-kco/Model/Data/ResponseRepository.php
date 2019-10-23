@@ -11,6 +11,40 @@ class ResponseRepository extends \Magento\Framework\Model\AbstractModel
     /**
      * @return bool|mixed
      */
+    public function getError()
+    {
+        return $this->getData(self::ERROR);
+    }
+
+    /**
+     * @param bool $value
+     * @return bool|ResponseRepository
+     */
+    public function setError($value)
+    {
+        return $this->setData(self::ERROR, $value);
+    }
+
+    /**
+     * @return mixed|string
+     */
+    public function getMessage()
+    {
+        return $this->getData(self::MESSAGE);
+    }
+
+    /**
+     * @param string $value
+     * @return bool|ResponseRepository
+     */
+    public function setMessage($value)
+    {
+        return $this->setData(self::MESSAGE, $value);
+    }
+
+    /**
+     * @return bool|mixed
+     */
     public function getIsUpdatedKlarna()
     {
         return $this->getData(self::IS_UPDATED_KLARNA);
