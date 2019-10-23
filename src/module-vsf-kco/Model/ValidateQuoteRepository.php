@@ -158,7 +158,7 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
 
         }catch (\Exception $e) {
             $response = [
-                'error' => false,
+                'error' => true,
                 'message' => $e->getMessage()
             ];
             $this->logger->error( $e->getMessage().' - klarnaOrderId: '.$klarnaOrderId);
@@ -194,12 +194,12 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
                     $this->updatedM2QuoteFromKlarnaOrder( $quoteM2, $klarnaOrder );
 
                     $this->logger->info('Update M2 Quote from Klarna Order - klarnaOrderId: '.$klarnaOrderId.' - M2 quote Id: '.$quoteM2->getId());
-                    
+
                     $isUpdatedM2 = true;
                 }
             }catch (\Exception $e) {
                 $response = [
-                    'error' => false,
+                    'error' => true,
                     'message' => $e->getMessage()
                 ];
                 $this->logger->error( $e->getMessage().' - klarnaOrderId: '.$klarnaOrderId);
@@ -210,7 +210,7 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
         $response = $this->responseValidateInterfaceFactory->create()
             ->setData([
             'error'             => false,
-            'message'           => __('Callback to M2 was triggered'),
+            'message'           => __('Callback to M2 was triggered with klarnaOrderId: '. $klarnaOrderId .' and M2 quote Id:'. $quoteM2->getId()),
             'is_updated_m2'     => $isUpdatedM2,
             'is_updated_klarna' => $isUpdatedKlarna,
             'quote_data'        => $quoteM2,
