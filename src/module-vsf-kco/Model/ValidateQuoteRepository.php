@@ -131,7 +131,12 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
         try {
 
             /** Fetch order from Klarna to check with Magento 2 */
-            $klarnaOrder = $this->klanaOrdermanagement->getOrder($klarnaOrderId);
+            $klarnaOrder = $this->klarnaApiService->makeRequest(
+                "/checkout/v3/orders/{$klarnaOrderId}",
+                '',
+                ServiceInterface::GET,
+                $klarnaOrderId
+            );
 
             $klarnaOrder = $this->dataObjectFactory->create(['data' => $klarnaOrder]);
 
@@ -181,9 +186,10 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
 
                     /** Make request to send to Klarna */
                     $this->klarnaApiService->makeRequest(
-                        '/checkout/v3/orders/'.$klarnaOrderId,
+                        "/checkout/v3/orders/{$klarnaOrderId}",
                         $data,
-                        ServiceInterface::POST
+                        ServiceInterface::POST,
+                        $klarnaOrderId
                     );
 
                     $isUpdatedKlarna = true;
