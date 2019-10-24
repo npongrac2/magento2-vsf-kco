@@ -182,7 +182,7 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
 
             $m2Total = $this->cartTotalManagement->get($cartId);
 
-            $m2OrderAmount = intval(round($m2Total->getGrandTotal() * 100));
+            $m2OrderAmount = intval(round($m2Total->getBaseGrandTotal() * 100));
 
             $klarnaOrderAmount = $klarnaOrder->getOrderAmount();
 
@@ -197,7 +197,7 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
 
         if ( $klarnaOrderAmount == $m2OrderAmount ) {
             /** @todo: some custom logic comes here */
-            $this->logger->info('Klarna and Quote Id have same amount - KlarnaOrderId: ', $klarnaOrderId .' quoteId: '.$quoteM2->getId());
+            $this->logger->info('Klarna and Quote Id have same amount - KlarnaOrderId: '. $klarnaOrderId .' - quoteId: '.$quoteM2->getId());
         }else {
 
             try {
@@ -348,7 +348,7 @@ class ValidateQuoteRepository implements \Kodbruket\VsfKco\Api\ValidateQuoteInte
     }
 
     /**
-     *
+     * Connect to Klarna API
      */
     private function connect()
     {
