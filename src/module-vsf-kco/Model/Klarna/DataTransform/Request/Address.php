@@ -48,12 +48,6 @@ class Address
             ? $klarnaAddressDto->getOrganizationName()
             : $klarnaAddressDto->getCareOf();
 
-
-        $region = $this->region->loadByName($klarnaAddressDto->getRegion(), $country);
-        if (empty($region->getId())) {
-            $region = $this->region->loadByCode($klarnaAddressDto->getRegion(), $country);
-        }
-
         $data = [
             'lastname'      => $klarnaAddressDto->getFamilyName(),
             'firstname'     => $klarnaAddressDto->getGivenName(),
@@ -63,12 +57,21 @@ class Address
             'street'        => implode(',', $streetData),
             'postcode'      => $klarnaAddressDto->getPostalCode(),
             'city'          => $klarnaAddressDto->getCity(),
-            'region_id'     => $region->getId(),
             'telephone'     => $klarnaAddressDto->getPhone(),
             'country_id'    => $country,
             'same_as_other' => $klarnaAddressDto->getSameAsOther() ? 1 : 0
         ];
 
+        $region = $this->region->loadByName($klarnaAddressDto->getRegion(), $country);
+
+        if (empty($region->getId())) {
+            $region = $this->region->loadByCode($klarnaAddressDto->getRegion(), $country);
+        }
+
+        if ($region) {
+            $data['region_id'] = $region->getId();
+            $data['region'] = $region->getName();
+        }
         if ($klarnaAddressDto->hasCustomerDob()) {
             $data['dob'] = $klarnaAddressDto->getCustomerDob();
         }
