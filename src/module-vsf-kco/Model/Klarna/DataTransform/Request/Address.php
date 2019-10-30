@@ -72,6 +72,7 @@ class Address
             $data['region_id'] = $region->getId();
             $data['region'] = $region->getName();
         }
+
         if ($klarnaAddressDto->hasCustomerDob()) {
             $data['dob'] = $klarnaAddressDto->getCustomerDob();
         }
