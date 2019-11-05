@@ -138,6 +138,9 @@ class Confirmation extends Action implements CsrfAwareActionInterface
         $maskedId = $placedKlarnaOrder->getDataByKey('merchant_reference2');
         $quoteIdMask = $this->quoteIdMaskFactory->create()->load($maskedId, 'masked_id');
         $quoteId = $quoteIdMask->getQuoteId();
+        if( (int)$quoteId==0 && ctype_digit(strval($maskedId))){
+            $quoteId = (int)$maskedId;
+        }
         $quote = $this->cartRepository->get($quoteId);
 
         $store = $quote->getStoreId();

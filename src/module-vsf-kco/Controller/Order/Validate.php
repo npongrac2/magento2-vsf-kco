@@ -243,7 +243,11 @@ class Validate extends Action implements CsrfAwareActionInterface
 
         /** @var $quoteIdMask QuoteIdMask */
         $quoteIdMask = $this->quoteIdMaskFactory->create()->load($mask, 'masked_id');
-        return $quoteIdMask->getQuoteId();
+        $quoteId = $quoteIdMask->getQuoteId();
+        if( (int)$quoteId==0 && ctype_digit(strval($mask))){
+            $quoteId = (int)$mask;
+        }
+        return $quoteId;
     }
 
     /**
